@@ -2,18 +2,22 @@ package chat
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/signal"
+	"regexp"
 	"syscall"
 )
 
 const (
 	RoleAdmin = "admin"
+	RoleStaff = "staff"
 	RoleUser  = "user"
 )
 
 type Message struct {
 	Text     string
+	Command  string
 	Sender   string
 	Receiver string
 }
@@ -25,10 +29,11 @@ type API interface {
 	Stop(c context.Context) error
 }
 
-type ActionFunc func(msg *Message) error
+type ActionFunc func(c context.Context, re *regexp.Regexp, msg *Message) error
 
 type Action struct {
-	re      string
+	Command string
+	re      *regexp.Regexp
 	example string
 	help    string
 	roles   []string
@@ -44,12 +49,16 @@ func WithAPI(api API) Option {
 	}
 }
 
-func RegisterAction(re, example, help string, fn ActionFunc, roles ...string) Option {
+func RegisterAction(command, pattern, example, help string, fn ActionFunc, roles ...string) Option {
 	return func(h *Handler) error {
 		if h.actions == nil {
 			h.actions = make([]*Action, 0)
 		}
-		h.actions = append(h.actions, &Action{re, example, help, roles, fn})
+		re, err := regexp.Compile(pattern)
+		if err != nil {
+			return err
+		}
+		h.actions = append(h.actions, &Action{command, re, example, help, roles, fn})
 		return nil
 	}
 }
@@ -104,8 +113,8 @@ func (h *Handler) Start(ctx context.Context) error {
 		cancel()
 		return err
 	}
-	go h.Run(c)
-	go h.Listen(c)
+	go h.run(c, cancel)
+	go h.listen(c, cancel)
 	// Listen for SigInt
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT)
@@ -118,15 +127,19 @@ func (h *Handler) Start(ctx context.Context) error {
 	return nil
 }
 
-func (h *Handler) Run(c context.Context) error {
+func (h *Handler) run(c context.Context, cancel context.CancelFunc) error {
 	for {
 		select {
 		case <-c.Done():
 			return c.Err()
 		case msg := <-h.msg:
+			if msg == nil {
+				continue
+			}
 			for _, action := range h.actions {
-				if action.re == msg.Text {
-					if err := action.fn(msg); err != nil {
+				if action.Command == msg.Command && action.re.MatchString(msg.Text) {
+					if err := action.fn(c, action.re, msg); err != nil {
+						cancel()
 						return err
 					}
 				}
@@ -135,11 +148,13 @@ func (h *Handler) Run(c context.Context) error {
 	}
 }
 
-func (h *Handler) Listen(c context.Context) error {
+func (h *Handler) listen(c context.Context, cancel context.CancelFunc) error {
 	for {
 		msg, err := (h.api).ReceiveMessage(c)
 		if err != nil {
-			return err
+			//cancel()
+			//return err
+			fmt.Printf("+error: %s\n", err)
 		}
 		h.msg <- msg
 	}
