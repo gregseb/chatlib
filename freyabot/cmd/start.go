@@ -25,9 +25,10 @@ to quickly create a Cobra application.`,
 		c := context.Background()
 		irc, err := irc.New(
 			irc.WithNick("freyabot"),
-			irc.WithNetwork("irc.rizon.net", 6667),
-			irc.WithChannel("#freyabot"),
+			irc.WithNetwork("irc.rizon.net", 7000),
+			//irc.WithNetwork("irc.rizon.net", 6697),
 			//irc.WithTLS(&tls.Config{ServerName: "irc.rizon.net"}),
+			irc.WithChannel("#freyabot"),
 		)
 		if err != nil {
 			panic(err)

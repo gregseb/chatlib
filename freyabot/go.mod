@@ -3,9 +3,12 @@ module github.com/gregseb/freyabot/freyabot
 go 1.21
 
 replace github.com/gregseb/freyabot/chat => ../chat
+
 replace github.com/gregseb/freyabot/irc => ../irc
 
 require (
+	github.com/gregseb/freyabot/chat v0.0.0-00010101000000-000000000000
+	github.com/gregseb/freyabot/irc v0.0.0-00010101000000-000000000000
 	github.com/spf13/cobra v1.8.0
 	github.com/spf13/viper v1.17.0
 )
@@ -17,6 +20,7 @@ require (
 	github.com/magiconair/properties v1.8.7 // indirect
 	github.com/mitchellh/mapstructure v1.5.0 // indirect
 	github.com/pelletier/go-toml/v2 v2.1.0 // indirect
+	github.com/pkg/errors v0.9.1 // indirect
 	github.com/sagikazarmark/locafero v0.3.0 // indirect
 	github.com/sagikazarmark/slog-shim v0.1.0 // indirect
 	github.com/sourcegraph/conc v0.3.0 // indirect

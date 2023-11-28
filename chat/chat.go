@@ -113,21 +113,21 @@ func (h *Handler) Start(ctx context.Context) error {
 		cancel()
 		return err
 	}
-	go h.run(c, cancel)
-	go h.listen(c, cancel)
+	go h.actionLoop(c)
+	go h.receiveLoop(c)
 	// Listen for SigInt
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT)
 	go func() {
 		<-sigs
+		h.api.Stop(c)
 		cancel()
 	}()
-	<-ctx.Done()
-	h.api.Stop(c)
+	<-c.Done()
 	return nil
 }
 
-func (h *Handler) run(c context.Context, cancel context.CancelFunc) error {
+func (h *Handler) actionLoop(c context.Context) error {
 	for {
 		select {
 		case <-c.Done():
@@ -139,8 +139,9 @@ func (h *Handler) run(c context.Context, cancel context.CancelFunc) error {
 			for _, action := range h.actions {
 				if action.Command == msg.Command && action.re.MatchString(msg.Text) {
 					if err := action.fn(c, action.re, msg); err != nil {
-						cancel()
-						return err
+						//cancel()
+						//return err
+						fmt.Printf("+error: %s\n", err)
 					}
 				}
 			}
@@ -148,11 +149,10 @@ func (h *Handler) run(c context.Context, cancel context.CancelFunc) error {
 	}
 }
 
-func (h *Handler) listen(c context.Context, cancel context.CancelFunc) error {
+func (h *Handler) receiveLoop(c context.Context) {
 	for {
-		msg, err := (h.api).ReceiveMessage(c)
+		msg, err := h.api.ReceiveMessage(c)
 		if err != nil {
-			//cancel()
 			//return err
 			fmt.Printf("+error: %s\n", err)
 		}

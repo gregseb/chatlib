@@ -10,7 +10,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/gregseb/freyabot/chat"
@@ -19,9 +18,10 @@ import (
 
 const (
 	DefaultNick                    = "freyabot"
-	DefaultLoginDelaySeconds       = 3
+	DefaultLoginDelaySeconds       = 5
 	DefaultDialTimeoutSeconds      = 10
 	DefaultKeepAliveSeconds        = 60
+	DefaultMsgBufferSize           = 100
 	ReadDelimiter             byte = '\n'
 )
 
@@ -85,6 +85,13 @@ func WithTLS(tls *tls.Config) Option {
 	}
 }
 
+func WithMessageBufferSize(size int) Option {
+	return func(a *API) error {
+		a.msgBufSize = size
+		return nil
+	}
+}
+
 func CombineOptions(opts ...Option) Option {
 	return func(a *API) error {
 		return a.ApplyOptions(opts...)
@@ -103,13 +110,15 @@ type API struct {
 	dialTimeoutSeconds float64
 	keepAliveSeconds   float64
 
-	ready     bool
-	sendMutex sync.Mutex
-	rsvMutex  sync.Mutex
-	conn      io.ReadWriteCloser
-	lnRe      *regexp.Regexp
-	pingRe    *regexp.Regexp
-	errRe     *regexp.Regexp
+	ready       bool
+	conn        io.ReadWriteCloser
+	lnRe        *regexp.Regexp
+	pingRe      *regexp.Regexp
+	errRe       *regexp.Regexp
+	msgBufSize  int
+	rawMsgs     chan []byte
+	lastMsgTime time.Time
+	reader      *bufio.Reader
 }
 
 var _ chat.API = (*API)(nil)
@@ -129,6 +138,7 @@ func New(opts ...Option) (chat.Option, error) {
 		loginDelaySeconds:  DefaultLoginDelaySeconds,
 		dialTimeoutSeconds: DefaultDialTimeoutSeconds,
 		keepAliveSeconds:   DefaultKeepAliveSeconds,
+		msgBufSize:         DefaultMsgBufferSize,
 	}
 	if err := a.ApplyOptions(opts...); err != nil {
 		return nil, err
@@ -149,9 +159,11 @@ func New(opts ...Option) (chat.Option, error) {
 		a.errRe = re
 	}
 
+	a.rawMsgs = make(chan []byte, a.msgBufSize)
+
 	return chat.CombineOptions(
 			chat.WithAPI(a),
-			chat.RegisterAction("372", "", "", "", a.actionOnReady),
+			chat.RegisterAction("003", "", "", "", a.actionOnReady),
 			chat.RegisterAction("PRIVMSG", "!join (.*)", "!join #channel", "Join the specified channel", a.actionJoinChannel, chat.RoleAdmin),
 			chat.RegisterAction("PRIVMSG", "!(part|leave)( (.*))?", "!part #channel", "leave the specified channel", a.actionLeaveChannel, chat.RoleAdmin),
 		),
@@ -160,7 +172,6 @@ func New(opts ...Option) (chat.Option, error) {
 
 // TODO Handle long messages
 func (a *API) SendMessage(c context.Context, msg *chat.Message) error {
-	w := io.Writer(a.conn)
 	parts := []string{msg.Command}
 	if msg.Receiver != "" {
 		parts = append(parts, msg.Receiver)
@@ -170,9 +181,7 @@ func (a *API) SendMessage(c context.Context, msg *chat.Message) error {
 	}
 	str := strings.Join(parts, " ")
 	bts := []byte(str + "\n")
-	a.sendMutex.Lock()
-	_, err := w.Write(bts)
-	a.sendMutex.Unlock()
+	_, err := a.conn.Write(bts)
 	fmt.Println("+" + str)
 	if err != nil {
 		return err
@@ -181,18 +190,23 @@ func (a *API) SendMessage(c context.Context, msg *chat.Message) error {
 }
 
 // TODO Handle long messages
-func (a *API) ReceiveMessage(c context.Context) (*chat.Message, error) {
+func (a *API) readMessage(c context.Context) error {
 	// Setup bufio reader
-	r := bufio.NewReader(a.conn)
-	a.rsvMutex.Lock()
-	line, err := r.ReadString(ReadDelimiter)
-	a.rsvMutex.Unlock()
+	bts, err := a.reader.ReadBytes(ReadDelimiter)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	// TODO Use an actual logging tool
-	fmt.Print(line)
+	a.rawMsgs <- bts
+	return nil
+}
 
+func (a *API) ReceiveMessage(c context.Context) (*chat.Message, error) {
+	if ct := len(a.rawMsgs); ct == a.msgBufSize {
+		fmt.Printf("irc: WARNING message buffer full (%d messages)\n", ct)
+	}
+	bts := <-a.rawMsgs
+	line := string(bts)
+	fmt.Print(line)
 	msg := &chat.Message{}
 	if a.lnRe.MatchString(line) {
 		parts := a.lnRe.FindStringSubmatch(line)
@@ -210,6 +224,7 @@ func (a *API) ReceiveMessage(c context.Context) (*chat.Message, error) {
 		// TODO return custom error
 		return nil, errors.Errorf("irc: line does not match pattern: %s", line)
 	}
+	a.lastMsgTime = time.Now()
 	return msg, nil
 }
 
@@ -217,14 +232,14 @@ func (a *API) Start(c context.Context) error {
 	if err := a.connect(c); err != nil {
 		return err
 	}
+	go a.pollConn(c)
 	return nil
 }
 
 func (a *API) Stop(c context.Context) error {
 	a.SendMessage(c, &chat.Message{
-		Text:     "QUIT :my people need me",
-		Sender:   "irc",
-		Receiver: "irc",
+		Command: "QUIT",
+		Text:    "my people need me",
 	})
 	if err := a.disconnect(); err != nil {
 		return err
@@ -248,18 +263,45 @@ func (a *API) connect(c context.Context) error {
 		conn = cn
 	}
 	a.conn = conn
+	a.reader = bufio.NewReader(a.conn)
 
 	// Wait to start receiving messages
-	if _, err := a.ReceiveMessage(c); err != nil {
-		return err
-	}
-	// Wait for login delay
-	time.Sleep(time.Duration(float64(time.Second) * a.loginDelaySeconds))
-	// Attempt to login
-	if err := a.login(c); err != nil {
-		return err
-	}
+	go func() {
+		start := time.Now()
+		for {
+			if !a.lastMsgTime.IsZero() {
+				break
+			} else if time.Since(start) > time.Duration(float64(time.Second)*a.dialTimeoutSeconds) {
+				fmt.Printf("irc: timed out waiting for message\n")
+				return
+			} else {
+				time.Sleep(time.Duration(float64(time.Second) * 0.1))
+			}
+		}
+		// Wait for login delay
+		time.Sleep(time.Duration(float64(time.Second) * a.loginDelaySeconds))
+		// Attempt to login
+		if err := a.login(c); err != nil {
+			fmt.Printf("irc: error logging in: %s\n", err)
+			return
+		}
+	}()
 	return nil
+}
+
+// pollConn polls the server for messages and queues them for parsing.
+// We are doing it this way because the server may send messages faster
+// than we can parse them.
+// TODO It shouldn't be possible to miss messages, but it's happening with motd after registering.
+// And before implementing a queue, it was happening with most of the messages after registering.
+func (a *API) pollConn(c context.Context) {
+	for {
+		err := a.readMessage(c)
+		if err != nil {
+			//return err
+			fmt.Printf("+error: %s\n", err)
+		}
+	}
 }
 
 func (a *API) disconnect() error {
