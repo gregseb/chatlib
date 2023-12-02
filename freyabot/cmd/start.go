@@ -5,10 +5,14 @@ package cmd
 
 import (
 	"context"
+	"regexp"
+	"strings"
 
 	"github.com/gregseb/freyabot/chat"
 	"github.com/gregseb/freyabot/irc"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
+	"github.com/spf13/viper"
 )
 
 // startCmd represents the start command
@@ -23,19 +27,13 @@ This application is a tool to generate the needed files
 to quickly create a Cobra application.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		c := context.Background()
-		irc, err := irc.New(
-			irc.WithNick("freyabot"),
-			irc.WithNetwork("irc.rizon.net", 7000),
-			//irc.WithNetwork("irc.rizon.net", 6697),
-			//irc.WithTLS(&tls.Config{ServerName: "irc.rizon.net"}),
-			irc.WithChannel("#freyabot"),
-		)
-		if err != nil {
+		chatOpts := make([]chat.Option, 0)
+		if co, err := irc.Init(); err != nil {
 			panic(err)
+		} else if co != nil {
+			chatOpts = append(chatOpts, *co)
 		}
-		chat, err := chat.New(
-			irc,
-		)
+		chat, err := chat.New(chatOpts...)
 		if err != nil {
 			panic(err)
 		}
@@ -44,16 +42,25 @@ to quickly create a Cobra application.`,
 	},
 }
 
+func bindAllFlags(prefixes []string) {
+	// Turn prefixes into a regexp pattern
+	pattern := "(" + strings.Join(prefixes, "|") + ")-(.*)"
+	re := regexp.MustCompile(pattern)
+
+	startCmd.Flags().VisitAll(func(f *pflag.Flag) {
+		if !re.MatchString(f.Name) {
+			// panic
+			panic("Flag name " + f.Name + " does not match pattern " + pattern)
+		}
+		m := re.FindStringSubmatch(f.Name)
+		viper.BindPFlag(m[1]+"."+m[2], f)
+	})
+}
+
 func init() {
 	rootCmd.AddCommand(startCmd)
-
-	// Here you will define your flags and configuration settings.
-
-	// Cobra supports Persistent Flags which will work for this command
-	// and all subcommands, e.g.:
-	// startCmd.PersistentFlags().String("foo", "", "A help for foo")
-
-	// Cobra supports local flags which will only run when this command
-	// is called directly, e.g.:
-	// startCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
+	irc.Flags(startCmd)
+	bindAllFlags([]string{irc.ConfigPrefix})
+	viper.SetEnvPrefix(cmdName)
+	viper.AutomaticEnv()
 }

@@ -1,0 +1,9 @@
+irc:
+  server: irc.rizon.net
+  port: 6697
+  tls: true
+  nick: freyabot
+  auth-method: none
+  msg-buffer-size: 100
+  channels:
+    - "#freyabot"

@@ -25,6 +25,13 @@ const (
 	ReadDelimiter             byte = '\n'
 )
 
+const (
+	AuthMethodNone = iota
+	AuthMethodNickServ
+	AuthMethodSASL
+	AuthMethodCertFP
+)
+
 const linePattern = `^:(?P<sender>\S+) (?P<command>\S+) (?P<recipient>\S+) :(.*)\r\n$`
 const pingPattern = `^PING :(?P<arg>.*)\r\n$`
 const errPattern = `^ERROR :(?P<msg>.*)\r\n$`
@@ -40,6 +47,20 @@ func WithNetwork(host string, port int) Option {
 func WithNick(nick string) Option {
 	return func(a *API) error {
 		a.nick = nick
+		return nil
+	}
+}
+
+func WithPassword(password string) Option {
+	return func(a *API) error {
+		a.password = password
+		return nil
+	}
+}
+
+func WithAuthMethod(method int) Option {
+	return func(a *API) error {
+		a.authMethod = method
 		return nil
 	}
 }
@@ -78,9 +99,9 @@ func WithKeepAlive(seconds float64) Option {
 	}
 }
 
-func WithTLS(tls *tls.Config) Option {
+func WithTLS(cfg *tls.Config) Option {
 	return func(a *API) error {
-		a.tls = tls
+		a.tls = cfg
 		return nil
 	}
 }
@@ -102,6 +123,8 @@ type Option func(*API) error
 
 type API struct {
 	nick               string
+	authMethod         int
+	password           string
 	networkHost        string
 	networkPort        int
 	channels           []string
@@ -239,7 +262,7 @@ func (a *API) Start(c context.Context) error {
 func (a *API) Stop(c context.Context) error {
 	a.SendMessage(c, &chat.Message{
 		Command: "QUIT",
-		Text:    "my people need me",
+		Text:    "I must go! My people need me.",
 	})
 	if err := a.disconnect(); err != nil {
 		return err
