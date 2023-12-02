@@ -1,9 +1,38 @@
+log:
+  # Available log levels: trace, debug, info, warn, error, fatal, panic
+  # Recommend using a log level of warn or higher in production
+  level: trace
+  # Logs are in json by default. Set pretty to true to make them human readable.
+  # Recommend setting pretty to false in production
+  pretty: true
+
 irc:
+  # Server to connect to. Required.
   server: irc.rizon.net
+  # Port to connect to. Will attempt to use 6697 if not provided and tls is true. otherwise will attempt to use 7000.
   port: 6697
-  tls: true
   nick: freyabot
+  # Available auth methods: none, nickserv, sasl, certfp
+  # Note that tls must be enabled for certfp to work.
   auth-method: none
-  msg-buffer-size: 100
+  # Password for auth method. Required if auth-method is nickserv or sasl.
+  #auth-password: horsebatterystaple
+
+  # TLS will be used by default. Set to true to disable.
+  no-tls: true
+  # Path to ca cert. Might be useful for connecting to a server with a self-signed cert.
+  #ca-cert:
+  #  - /path/to/ca-cert.pem
+  # Alternatively, you can disable cert verification entirely.
+  #insecure-skip-verify: true
+  # Path to client cert and key. Required if auth-method is certfp.
+  #client-cert: /path/to/client-cert.pem
+  #client-key: /path/to/client-key.pem  
+
+  # Channels to join. If not provided you will need to invite the bot to channels.
   channels:
     - "#freyabot"
+
+  # Number of messages to buffer per channel. Defaults to 100.
+  # This shouldn't need to be changed, but it might be useful to increase if you have a lot of channels.
+  msg-buffer-size: 100

@@ -87,9 +87,9 @@ func Flags(cmd *cobra.Command) {
 	// Enable
 	cmd.Flags().Bool(ApiName+"-enable", true, "Enable IRC")
 	// Server
-	cmd.Flags().String(ApiName+"-server", "irc.rizon.net", "IRC server to connect to")
+	cmd.Flags().String(ApiName+"-server", "", "IRC server to connect to. Required")
 	// Port
-	cmd.Flags().Int(ApiName+"-port", 6697, "IRC server port to connect to")
+	cmd.Flags().Int(ApiName+"-port", 0, "IRC server port to connect to. If not specified, defaults to 6697 if TLS is enabled, otherwise 6667")
 	// Nick
 	cmd.Flags().String(ApiName+"-nick", "freyabot", "IRC nick to use")
 	// AuthMethod
@@ -97,13 +97,13 @@ func Flags(cmd *cobra.Command) {
 	// AuthPassword
 	cmd.Flags().String(ApiName+"-auth-password", "", "IRC authentication password. Required if auth-method is nickserv or sasl")
 	// Channels
-	cmd.Flags().StringSlice(ApiName+"-channels", []string{"#freyabot"}, "IRC channels to join")
+	cmd.Flags().StringSlice(ApiName+"-channels", []string{}, "IRC channels to join")
 	// DialTimeoutSeconds
 	cmd.Flags().Int(ApiName+"-dial-timeout", 10, "IRC dial timeout in seconds")
 	// KeepAliveSeconds
 	cmd.Flags().Int(ApiName+"-keepalive", 60, "IRC keepalive interval in seconds")
 	// TLS
-	cmd.Flags().Bool(ApiName+"-no-tls", false, "Disable TLS for IRC")
+	cmd.Flags().Bool(ApiName+"-no-tls", false, "Disable TLS for IRC. Take note of the port you are connecting to and be sure to read the server's documentation")
 	// TLSCaCert
 	cmd.Flags().StringSlice(ApiName+"-tls-ca-certs", []string{}, "IRC TLS CA certificates")
 	// TLSClientCert

@@ -24,6 +24,8 @@ const (
 	DefaultDialTimeoutSeconds      = 10
 	DefaultKeepAliveSeconds        = 60
 	DefaultMsgBufferSize           = 100
+	DefaultTlsPort                 = 6697
+	DefaultPlainPort               = 6667
 	ReadDelimiter             byte = '\n'
 )
 
@@ -168,6 +170,25 @@ func New(opts ...Option) (chat.Option, error) {
 	if err := a.ApplyOptions(opts...); err != nil {
 		return nil, err
 	}
+	// Make sure a server was specified
+	if a.networkHost == "" {
+		return nil, errors.WithMessage(chat.ErrInvalidConfig, "irc: no server specified")
+	}
+	log.Info().Str("api", ApiName).Msgf("server: %s", a.networkHost)
+	if a.networkPort == 0 {
+		if a.tls != nil {
+			log.Info().Str("api", ApiName).Msgf("no port specified and tls is enabled, using default TLS port: %d", DefaultTlsPort)
+			a.networkPort = DefaultTlsPort
+		} else {
+			log.Info().Str("api", ApiName).Msgf("no port specified and tls is disabled, using default plain port: %d", DefaultPlainPort)
+			a.networkPort = DefaultPlainPort
+		}
+	} else {
+		log.Info().Str("api", ApiName).Msgf("port: %d", a.networkPort)
+	}
+	log.Info().Str("api", ApiName).Msgf("nick: %s", a.nick)
+	log.Info().Str("api", ApiName).Msgf("channels: %v", a.channels)
+
 	if re, err := regexp.Compile(linePattern); err != nil {
 		return nil, err
 	} else {
