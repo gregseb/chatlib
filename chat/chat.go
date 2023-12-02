@@ -2,11 +2,12 @@ package chat
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"os/signal"
 	"regexp"
 	"syscall"
+
+	"github.com/rs/zerolog/log"
 )
 
 const (
@@ -139,9 +140,7 @@ func (h *Handler) actionLoop(c context.Context) error {
 			for _, action := range h.actions {
 				if action.Command == msg.Command && action.re.MatchString(msg.Text) {
 					if err := action.fn(c, action.re, msg); err != nil {
-						//cancel()
-						//return err
-						fmt.Printf("+error: %s\n", err)
+						log.Error().Err(err).Msg("error in action")
 					}
 				}
 			}
@@ -153,8 +152,7 @@ func (h *Handler) receiveLoop(c context.Context) {
 	for {
 		msg, err := h.api.ReceiveMessage(c)
 		if err != nil {
-			//return err
-			fmt.Printf("+error: %s\n", err)
+			log.Error().Err(err).Msg("error receiving message")
 		}
 		h.msg <- msg
 	}

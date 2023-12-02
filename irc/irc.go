@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"crypto/tls"
-	"fmt"
 	"io"
 	"net"
 	"regexp"
@@ -14,7 +13,10 @@ import (
 
 	"github.com/gregseb/freyabot/chat"
 	"github.com/pkg/errors"
+	"github.com/rs/zerolog/log"
 )
+
+const ApiName = "irc"
 
 const (
 	DefaultNick                    = "freyabot"
@@ -205,7 +207,7 @@ func (a *API) SendMessage(c context.Context, msg *chat.Message) error {
 	str := strings.Join(parts, " ")
 	bts := []byte(str + "\n")
 	_, err := a.conn.Write(bts)
-	fmt.Println("+" + str)
+	log.Debug().Str("api", ApiName).Str("irc", str).Msg("sent message")
 	if err != nil {
 		return err
 	}
@@ -225,11 +227,11 @@ func (a *API) readMessage(c context.Context) error {
 
 func (a *API) ReceiveMessage(c context.Context) (*chat.Message, error) {
 	if ct := len(a.rawMsgs); ct == a.msgBufSize {
-		fmt.Printf("irc: WARNING message buffer full (%d messages)\n", ct)
+		log.Warn().Str("api", ApiName).Msgf("message buffer full (%d messages)", ct)
 	}
 	bts := <-a.rawMsgs
 	line := string(bts)
-	fmt.Print(line)
+	log.Debug().Str("api", ApiName).Str("irc", line).Msg("received message")
 	msg := &chat.Message{}
 	if a.lnRe.MatchString(line) {
 		parts := a.lnRe.FindStringSubmatch(line)
@@ -295,7 +297,7 @@ func (a *API) connect(c context.Context) error {
 			if !a.lastMsgTime.IsZero() {
 				break
 			} else if time.Since(start) > time.Duration(float64(time.Second)*a.dialTimeoutSeconds) {
-				fmt.Printf("irc: timed out waiting for message\n")
+				log.Error().Str("api", ApiName).Msg("timed out waiting for message")
 				return
 			} else {
 				time.Sleep(time.Duration(float64(time.Second) * 0.1))
@@ -305,7 +307,9 @@ func (a *API) connect(c context.Context) error {
 		time.Sleep(time.Duration(float64(time.Second) * a.loginDelaySeconds))
 		// Attempt to login
 		if err := a.login(c); err != nil {
-			fmt.Printf("irc: error logging in: %s\n", err)
+			// TODO If we fail to log in we should try again after a delay and fail if we can't
+			// log in after a certain number of attempts.
+			log.Error().Str("api", ApiName).Err(err).Msg("error logging in")
 			return
 		}
 	}()
@@ -321,8 +325,7 @@ func (a *API) pollConn(c context.Context) {
 	for {
 		err := a.readMessage(c)
 		if err != nil {
-			//return err
-			fmt.Printf("+error: %s\n", err)
+			log.Error().Str("api", ApiName).Err(err).Msg("error reading message")
 		}
 	}
 }

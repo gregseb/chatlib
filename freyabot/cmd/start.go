@@ -8,6 +8,7 @@ import (
 
 	"github.com/gregseb/freyabot/chat"
 	"github.com/gregseb/freyabot/irc"
+	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -26,13 +27,13 @@ to quickly create a Cobra application.`,
 		c := context.Background()
 		chatOpts := make([]chat.Option, 0)
 		if co, err := irc.Init(); err != nil {
-			panic(err)
+			log.Fatal().Err(err).Msg("failed to initialize IRC")
 		} else if co != nil {
 			chatOpts = append(chatOpts, *co)
 		}
 		chat, err := chat.New(chatOpts...)
 		if err != nil {
-			panic(err)
+			log.Fatal().Err(err).Msg("failed to initialize chat")
 		}
 
 		chat.Start(c)
@@ -42,7 +43,7 @@ to quickly create a Cobra application.`,
 func init() {
 	rootCmd.AddCommand(startCmd)
 	irc.Flags(startCmd)
-	bindAllFlags(startCmd, false, []string{irc.ConfigPrefix})
+	bindAllFlags(startCmd, false, []string{irc.ApiName})
 	viper.SetEnvPrefix(cmdName)
 	viper.AutomaticEnv()
 }

@@ -45,7 +45,7 @@ func Execute() {
 }
 
 func init() {
-	cobra.OnInitialize(initConfig)
+	cobra.OnInitialize(initConfig, initLogging)
 
 	// Here you will define your flags and configuration settings.
 	// Cobra supports persistent flags, which, if defined here,
@@ -57,8 +57,6 @@ func init() {
 	rootCmd.PersistentFlags().BoolP("log-pretty", "p", false, "Pretty print logs. Use only for debugging")
 
 	bindAllFlags(rootCmd, true, []string{"log"})
-
-	initLogging()
 }
 
 // initConfig reads in config file and ENV variables if set.
@@ -105,11 +103,13 @@ func initLogging() {
 	default:
 		panic("Invalid log level: " + viper.GetString("log.level"))
 	}
-	log.Info().Msg("Log level set to " + strings.ToUpper(viper.GetString("log.level")))
 	// Check if we should pretty print logs
 	if viper.GetBool("log.pretty") {
 		log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
-		log.Info().Msg("Pretty print logs enabled")
+	}
+	log.Info().Msg("Log level set to " + strings.ToUpper(viper.GetString("log.level")))
+	if viper.GetBool("log.pretty") {
+		log.Info().Msg("Log pretty print enabled")
 	}
 }
 

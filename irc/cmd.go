@@ -8,24 +8,28 @@ import (
 
 	"github.com/gregseb/freyabot/chat"
 	"github.com/pkg/errors"
+	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
-const ConfigPrefix = "irc"
-
 func Init() (*chat.Option, error) {
-	if !viper.GetBool(ConfigPrefix + ".enable") {
+	if !viper.GetBool(ApiName + ".enable") {
+		log.Info().Msg("IRC disabled")
 		return nil, nil
 	}
+	log.Info().Msg("IRC enabled")
 	var t *tls.Config
-	if !viper.GetBool(ConfigPrefix + ".no-tls") {
+	if !viper.GetBool(ApiName + ".no-tls") {
+		log.Info().Str("api", ApiName).Msg("TLS Enabled")
 		t = &tls.Config{}
-		t.ServerName = viper.GetString(ConfigPrefix + ".server")
-		t.InsecureSkipVerify = viper.GetBool(ConfigPrefix + ".tls-insecure-skip-verify")
-		if len(viper.GetStringSlice(ConfigPrefix+".tls-ca-certs")) > 0 {
+		t.ServerName = viper.GetString(ApiName + ".server")
+		log.Info().Str("api", ApiName).Msgf("tls using servername: %s", t.ServerName)
+		t.InsecureSkipVerify = viper.GetBool(ApiName + ".tls-insecure-skip-verify")
+		log.Info().Str("api", ApiName).Msgf("tls insecure skip verify: %t", t.InsecureSkipVerify)
+		if len(viper.GetStringSlice(ApiName+".tls-ca-certs")) > 0 {
 			t.RootCAs = x509.NewCertPool()
-			for _, ca := range viper.GetStringSlice(ConfigPrefix + ".tls-ca-certs") {
+			for _, ca := range viper.GetStringSlice(ApiName + ".tls-ca-certs") {
 				if ca != "" {
 					if _, err := os.Stat(ca); os.IsNotExist(err) {
 						return nil, errors.Wrapf(fmt.Errorf("%s: %w", chat.ErrInvalidConfig, err), "irc: CA certificate does not exist: %s", ca)
@@ -35,40 +39,45 @@ func Init() (*chat.Option, error) {
 					} else {
 						t.RootCAs.AppendCertsFromPEM(caCert)
 					}
+					log.Trace().Str("api", ApiName).Msgf("tls added CA certificate: %s", ca)
 				}
 			}
+			log.Info().Str("api", ApiName).Msgf("tls using CA certificates: %v", viper.GetStringSlice(ApiName+".tls-ca-certs"))
 		}
-		if viper.GetString(ConfigPrefix+".tls-client-cert") != "" && viper.GetString(ConfigPrefix+".tls-client-key") != "" {
-			cert, err := tls.LoadX509KeyPair(viper.GetString(ConfigPrefix+".tls-client-cert"), viper.GetString(ConfigPrefix+".tls-client-key"))
+		if viper.GetString(ApiName+".tls-client-cert") != "" && viper.GetString(ApiName+".tls-client-key") != "" {
+			cert, err := tls.LoadX509KeyPair(viper.GetString(ApiName+".tls-client-cert"), viper.GetString(ApiName+".tls-client-key"))
 			if err != nil {
-				return nil, errors.Wrapf(fmt.Errorf("%s: %w", chat.ErrInvalidConfig, err), "irc: failed to load client certificate pair: %s, %s", viper.GetString(ConfigPrefix+".tls-client-cert"), viper.GetString(ConfigPrefix+".tls-client-key"))
+				return nil, errors.Wrapf(fmt.Errorf("%s: %w", chat.ErrInvalidConfig, err), "irc: failed to load client certificate pair: %s, %s", viper.GetString(ApiName+".tls-client-cert"), viper.GetString(ApiName+".tls-client-key"))
 			}
 			t.Certificates = []tls.Certificate{cert}
+			log.Info().Str("api", ApiName).Msgf("tls using client certificate: %s", viper.GetString(ApiName+".tls-client-cert"))
+			log.Info().Str("api", ApiName).Msgf("tls using client key: %s", viper.GetString(ApiName+".tls-client-key"))
 		}
 	}
 	var authMethod int
-	authStr := viper.GetString(ConfigPrefix + ".auth-method")
-	if authStr == "none" {
+	switch viper.GetString(ApiName + ".auth-method") {
+	case "none":
 		authMethod = AuthMethodNone
-	} else if authStr == "nickserv" {
+	case "nickserv":
 		authMethod = AuthMethodNickServ
-	} else if authStr == "sasl" {
+	case "sasl":
 		authMethod = AuthMethodSASL
-	} else if authStr == "certfp" {
+	case "certfp":
 		authMethod = AuthMethodCertFP
-	} else {
-		return nil, errors.Wrapf(chat.ErrInvalidConfig, "irc: invalid auth method: %s", authStr)
+	default:
+		return nil, errors.Wrapf(chat.ErrInvalidConfig, "irc: invalid auth method: %s", viper.GetString(ApiName+".auth-method"))
 	}
+	log.Info().Str("api", ApiName).Msgf("auth method: %s", viper.GetString(ApiName+".auth-method"))
 
 	chatOpt, err := New(
-		WithNetwork(viper.GetString(ConfigPrefix+".server"), viper.GetInt(ConfigPrefix+".port")),
-		WithNick(viper.GetString(ConfigPrefix+".nick")),
+		WithNetwork(viper.GetString(ApiName+".server"), viper.GetInt(ApiName+".port")),
+		WithNick(viper.GetString(ApiName+".nick")),
 		WithAuthMethod(authMethod),
-		WithPassword(viper.GetString(ConfigPrefix+".auth-password")),
-		WithChannels(viper.GetStringSlice(ConfigPrefix+".channels")),
-		WithDialTimeout(viper.GetFloat64(ConfigPrefix+".dial-timeout")),
-		WithKeepAlive(viper.GetFloat64(ConfigPrefix+".keepalive")),
-		WithMessageBufferSize(viper.GetInt(ConfigPrefix+".msg-buffer-size")),
+		WithPassword(viper.GetString(ApiName+".auth-password")),
+		WithChannels(viper.GetStringSlice(ApiName+".channels")),
+		WithDialTimeout(viper.GetFloat64(ApiName+".dial-timeout")),
+		WithKeepAlive(viper.GetFloat64(ApiName+".keepalive")),
+		WithMessageBufferSize(viper.GetInt(ApiName+".msg-buffer-size")),
 		WithTLS(t),
 	)
 	return &chatOpt, err
@@ -76,33 +85,33 @@ func Init() (*chat.Option, error) {
 
 func Flags(cmd *cobra.Command) {
 	// Enable
-	cmd.Flags().Bool(ConfigPrefix+"-enable", true, "Enable IRC")
+	cmd.Flags().Bool(ApiName+"-enable", true, "Enable IRC")
 	// Server
-	cmd.Flags().String(ConfigPrefix+"-server", "irc.rizon.net", "IRC server to connect to")
+	cmd.Flags().String(ApiName+"-server", "irc.rizon.net", "IRC server to connect to")
 	// Port
-	cmd.Flags().Int(ConfigPrefix+"-port", 6697, "IRC server port to connect to")
+	cmd.Flags().Int(ApiName+"-port", 6697, "IRC server port to connect to")
 	// Nick
-	cmd.Flags().String(ConfigPrefix+"-nick", "freyabot", "IRC nick to use")
+	cmd.Flags().String(ApiName+"-nick", "freyabot", "IRC nick to use")
 	// AuthMethod
-	cmd.Flags().String(ConfigPrefix+"-auth-method", "none", "IRC authentication method, one of: none, sasl, nickserv, certfp.")
+	cmd.Flags().String(ApiName+"-auth-method", "none", "IRC authentication method, one of: none, sasl, nickserv, certfp.")
 	// AuthPassword
-	cmd.Flags().String(ConfigPrefix+"-auth-password", "", "IRC authentication password. Required if auth-method is nickserv or sasl")
+	cmd.Flags().String(ApiName+"-auth-password", "", "IRC authentication password. Required if auth-method is nickserv or sasl")
 	// Channels
-	cmd.Flags().StringSlice(ConfigPrefix+"-channels", []string{"#freyabot"}, "IRC channels to join")
+	cmd.Flags().StringSlice(ApiName+"-channels", []string{"#freyabot"}, "IRC channels to join")
 	// DialTimeoutSeconds
-	cmd.Flags().Int(ConfigPrefix+"-dial-timeout", 10, "IRC dial timeout in seconds")
+	cmd.Flags().Int(ApiName+"-dial-timeout", 10, "IRC dial timeout in seconds")
 	// KeepAliveSeconds
-	cmd.Flags().Int(ConfigPrefix+"-keepalive", 60, "IRC keepalive interval in seconds")
+	cmd.Flags().Int(ApiName+"-keepalive", 60, "IRC keepalive interval in seconds")
 	// TLS
-	cmd.Flags().Bool(ConfigPrefix+"-no-tls", false, "Disable TLS for IRC")
+	cmd.Flags().Bool(ApiName+"-no-tls", false, "Disable TLS for IRC")
 	// TLSCaCert
-	cmd.Flags().StringSlice(ConfigPrefix+"-tls-ca-certs", []string{}, "IRC TLS CA certificates")
+	cmd.Flags().StringSlice(ApiName+"-tls-ca-certs", []string{}, "IRC TLS CA certificates")
 	// TLSClientCert
-	cmd.Flags().String(ConfigPrefix+"-tls-client-cert", "", "IRC TLS client certificate. Required if auth-method is certfp")
+	cmd.Flags().String(ApiName+"-tls-client-cert", "", "IRC TLS client certificate. Required if auth-method is certfp")
 	// TLSClientKey
-	cmd.Flags().String(ConfigPrefix+"-tls-client-key", "", "IRC TLS client key. Required if auth-method is certfp")
+	cmd.Flags().String(ApiName+"-tls-client-key", "", "IRC TLS client key. Required if auth-method is certfp")
 	// TLSInsecureSkipVerify
-	cmd.Flags().Bool(ConfigPrefix+"-tls-insecure-skip-verify", false, "IRC TLS insecure skip verify")
+	cmd.Flags().Bool(ApiName+"-tls-insecure-skip-verify", false, "IRC TLS insecure skip verify")
 	// MsgBufferSize
-	cmd.Flags().Int(ConfigPrefix+"-msg-buffer-size", 100, "IRC message buffer size")
+	cmd.Flags().Int(ApiName+"-msg-buffer-size", 100, "IRC message buffer size")
 }
