@@ -5,13 +5,10 @@ package cmd
 
 import (
 	"context"
-	"regexp"
-	"strings"
 
 	"github.com/gregseb/freyabot/chat"
 	"github.com/gregseb/freyabot/irc"
 	"github.com/spf13/cobra"
-	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
 )
 
@@ -42,25 +39,10 @@ to quickly create a Cobra application.`,
 	},
 }
 
-func bindAllFlags(prefixes []string) {
-	// Turn prefixes into a regexp pattern
-	pattern := "(" + strings.Join(prefixes, "|") + ")-(.*)"
-	re := regexp.MustCompile(pattern)
-
-	startCmd.Flags().VisitAll(func(f *pflag.Flag) {
-		if !re.MatchString(f.Name) {
-			// panic
-			panic("Flag name " + f.Name + " does not match pattern " + pattern)
-		}
-		m := re.FindStringSubmatch(f.Name)
-		viper.BindPFlag(m[1]+"."+m[2], f)
-	})
-}
-
 func init() {
 	rootCmd.AddCommand(startCmd)
 	irc.Flags(startCmd)
-	bindAllFlags([]string{irc.ConfigPrefix})
+	bindAllFlags(startCmd, false, []string{irc.ConfigPrefix})
 	viper.SetEnvPrefix(cmdName)
 	viper.AutomaticEnv()
 }

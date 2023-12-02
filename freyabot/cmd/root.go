@@ -6,8 +6,13 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"regexp"
+	"strings"
 
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
 )
 
@@ -47,6 +52,13 @@ func init() {
 	// will be global for your application.
 
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.freyabot.yaml)")
+	// Logging flags
+	rootCmd.PersistentFlags().StringP("log-level", "l", "info", "Log level. One of: trace, debug, info, warn, error, fatal, panic")
+	rootCmd.PersistentFlags().BoolP("log-pretty", "p", false, "Pretty print logs. Use only for debugging")
+
+	bindAllFlags(rootCmd, true, []string{"log"})
+
+	initLogging()
 }
 
 // initConfig reads in config file and ENV variables if set.
@@ -69,5 +81,54 @@ func initConfig() {
 	// If a config file is found, read it in.
 	if err := viper.ReadInConfig(); err == nil {
 		fmt.Fprintln(os.Stderr, "Using config file:", viper.ConfigFileUsed())
+	}
+}
+
+func initLogging() {
+	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
+	// Set log level
+	switch viper.GetString("log.level") {
+	case "trace":
+		zerolog.SetGlobalLevel(zerolog.TraceLevel)
+	case "debug":
+		zerolog.SetGlobalLevel(zerolog.DebugLevel)
+	case "info":
+		zerolog.SetGlobalLevel(zerolog.InfoLevel)
+	case "warn":
+		zerolog.SetGlobalLevel(zerolog.WarnLevel)
+	case "error":
+		zerolog.SetGlobalLevel(zerolog.ErrorLevel)
+	case "fatal":
+		zerolog.SetGlobalLevel(zerolog.FatalLevel)
+	case "panic":
+		zerolog.SetGlobalLevel(zerolog.PanicLevel)
+	default:
+		panic("Invalid log level: " + viper.GetString("log.level"))
+	}
+	log.Info().Msg("Log level set to " + strings.ToUpper(viper.GetString("log.level")))
+	// Check if we should pretty print logs
+	if viper.GetBool("log.pretty") {
+		log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
+		log.Info().Msg("Pretty print logs enabled")
+	}
+}
+
+func bindAllFlags(command *cobra.Command, pflags bool, prefixes []string) {
+	// Turn prefixes into a regexp pattern
+	pattern := "(" + strings.Join(prefixes, "|") + ")-(.*)"
+	re := regexp.MustCompile(pattern)
+
+	visit := func(f *pflag.Flag) {
+		if !re.MatchString(f.Name) {
+			return
+		}
+		m := re.FindStringSubmatch(f.Name)
+		viper.BindPFlag(m[1]+"."+m[2], f)
+	}
+
+	if pflags {
+		command.PersistentFlags().VisitAll(visit)
+	} else {
+		command.Flags().VisitAll(visit)
 	}
 }
