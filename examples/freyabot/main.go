@@ -1,10 +1,9 @@
 /*
 Copyright © 2023 NAME HERE <EMAIL ADDRESS>
-
 */
 package main
 
-import "github.com/gregseb/freyabot/freyabot/cmd"
+import "github.com/gregseb/chatlib/examples/freyabot/cmd"
 
 func main() {
 	cmd.Execute()

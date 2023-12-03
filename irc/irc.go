@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gregseb/freyabot/chat"
+	"github.com/gregseb/chatlib"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog/log"
 )
@@ -151,7 +151,7 @@ type API struct {
 	reader      *bufio.Reader
 }
 
-var _ chat.API = (*API)(nil)
+var _ chatlib.API = (*API)(nil)
 
 func (a *API) ApplyOptions(opts ...Option) error {
 	for _, opt := range opts {
@@ -197,7 +197,7 @@ func New(opts ...Option) (*API, error) {
 }
 
 // TODO Handle long messages
-func (a *API) SendMessage(c context.Context, msg *chat.Message) error {
+func (a *API) SendMessage(c context.Context, msg *chatlib.Message) error {
 	parts := []string{msg.Command}
 	if msg.Receiver != "" {
 		parts = append(parts, msg.Receiver)
@@ -226,14 +226,14 @@ func (a *API) readMessage(c context.Context) error {
 	return nil
 }
 
-func (a *API) ReceiveMessage(c context.Context) (*chat.Message, error) {
+func (a *API) ReceiveMessage(c context.Context) (*chatlib.Message, error) {
 	if ct := len(a.rawMsgs); ct == a.msgBufSize {
 		log.Warn().Str("api", ApiName).Msgf("message buffer full (%d messages)", ct)
 	}
 	bts := <-a.rawMsgs
 	line := string(bts)
 	log.Debug().Str("api", ApiName).Str("irc", line).Msg("received message")
-	msg := &chat.Message{
+	msg := &chatlib.Message{
 		Raw: line,
 	}
 	if a.lnRe.MatchString(line) {
@@ -274,7 +274,7 @@ func (a *API) Start(c context.Context) error {
 				break
 			} else if time.Since(start) > time.Duration(float64(time.Second)*a.dialTimeoutSeconds) {
 				log.Error().Str("api", ApiName).Msg("timed out waiting for message")
-				err = chat.ErrTimeout
+				err = chatlib.ErrTimeout
 				wg.Done()
 				return
 			} else {
@@ -299,7 +299,7 @@ func (a *API) Start(c context.Context) error {
 
 func (a *API) Stop(c context.Context) error {
 	a.open = false
-	a.SendMessage(c, &chat.Message{
+	a.SendMessage(c, &chatlib.Message{
 		Command: "QUIT",
 		Text:    "I must go! My people need me.",
 	})
@@ -359,7 +359,7 @@ func (a *API) disconnect() error {
 }
 
 func (a *API) login(c context.Context) error {
-	if err := a.SendMessage(c, &chat.Message{
+	if err := a.SendMessage(c, &chatlib.Message{
 		Command: "NICK" + " " + a.nick,
 	}); err != nil {
 		return err
@@ -368,7 +368,7 @@ func (a *API) login(c context.Context) error {
 	if a.nick != DefaultNick {
 		realname = realname + " (" + a.nick + ")"
 	}
-	if err := a.SendMessage(c, &chat.Message{
+	if err := a.SendMessage(c, &chatlib.Message{
 		Command: "USER " + a.nick + " 0 *",
 		Text:    realname,
 	}); err != nil {
@@ -387,7 +387,7 @@ func (a *API) joinChannels(c context.Context) error {
 }
 
 func (a *API) joinChannel(c context.Context, channel string) error {
-	if err := a.SendMessage(c, &chat.Message{
+	if err := a.SendMessage(c, &chatlib.Message{
 		Command: "JOIN " + channel,
 	}); err != nil {
 		return err
@@ -396,7 +396,7 @@ func (a *API) joinChannel(c context.Context, channel string) error {
 }
 
 func (a *API) leaveChannel(c context.Context, channel string) error {
-	if err := a.SendMessage(c, &chat.Message{
+	if err := a.SendMessage(c, &chatlib.Message{
 		Command: "PART " + channel,
 	}); err != nil {
 		return err
@@ -405,7 +405,7 @@ func (a *API) leaveChannel(c context.Context, channel string) error {
 }
 
 func (a *API) pong(c context.Context, arg string) error {
-	err := a.SendMessage(c, &chat.Message{
+	err := a.SendMessage(c, &chatlib.Message{
 		Command: "PONG",
 		Text:    arg,
 	})
@@ -415,7 +415,7 @@ func (a *API) pong(c context.Context, arg string) error {
 	return nil
 }
 
-func (a *API) actionOnReady(c context.Context, re *regexp.Regexp, msg *chat.Message) error {
+func (a *API) actionOnReady(c context.Context, re *regexp.Regexp, msg *chatlib.Message) error {
 	a.ready = true
 	if err := a.joinChannels(c); err != nil {
 		return err
@@ -423,14 +423,14 @@ func (a *API) actionOnReady(c context.Context, re *regexp.Regexp, msg *chat.Mess
 	return nil
 }
 
-func (a *API) actionJoinChannel(c context.Context, re *regexp.Regexp, msg *chat.Message) error {
+func (a *API) actionJoinChannel(c context.Context, re *regexp.Regexp, msg *chatlib.Message) error {
 	if err := a.joinChannel(c, re.FindStringSubmatch(msg.Text)[1]); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (a *API) actionLeaveChannel(c context.Context, re *regexp.Regexp, msg *chat.Message) error {
+func (a *API) actionLeaveChannel(c context.Context, re *regexp.Regexp, msg *chatlib.Message) error {
 	var channel string
 	if parts := re.FindStringSubmatch(msg.Text); parts[3] == "" {
 		channel = msg.Receiver
@@ -443,7 +443,7 @@ func (a *API) actionLeaveChannel(c context.Context, re *regexp.Regexp, msg *chat
 	return nil
 }
 
-func (a *API) actionPing(c context.Context, re *regexp.Regexp, msg *chat.Message) error {
+func (a *API) actionPing(c context.Context, re *regexp.Regexp, msg *chatlib.Message) error {
 	err := a.Ping()
 	return err
 }

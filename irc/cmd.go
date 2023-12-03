@@ -6,14 +6,14 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/gregseb/freyabot/chat"
+	"github.com/gregseb/chatlib"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
-func Init() (*chat.Option, error) {
+func Init() (*chatlib.Option, error) {
 	if !viper.GetBool(ApiName + ".enable") {
 		log.Info().Msg("IRC disabled")
 		return nil, nil
@@ -32,10 +32,10 @@ func Init() (*chat.Option, error) {
 			for _, ca := range viper.GetStringSlice(ApiName + ".tls-ca-certs") {
 				if ca != "" {
 					if _, err := os.Stat(ca); os.IsNotExist(err) {
-						return nil, errors.Wrapf(fmt.Errorf("%s: %w", chat.ErrInvalidConfig, err), "irc: CA certificate does not exist: %s", ca)
+						return nil, errors.Wrapf(fmt.Errorf("%s: %w", chatlib.ErrInvalidConfig, err), "irc: CA certificate does not exist: %s", ca)
 					}
 					if caCert, err := os.ReadFile(ca); err != nil {
-						return nil, errors.Wrapf(fmt.Errorf("%s: %w", chat.ErrInvalidConfig, err), "irc: failed to read CA certificate: %s", ca)
+						return nil, errors.Wrapf(fmt.Errorf("%s: %w", chatlib.ErrInvalidConfig, err), "irc: failed to read CA certificate: %s", ca)
 					} else {
 						t.RootCAs.AppendCertsFromPEM(caCert)
 					}
@@ -47,7 +47,7 @@ func Init() (*chat.Option, error) {
 		if viper.GetString(ApiName+".tls-client-cert") != "" && viper.GetString(ApiName+".tls-client-key") != "" {
 			cert, err := tls.LoadX509KeyPair(viper.GetString(ApiName+".tls-client-cert"), viper.GetString(ApiName+".tls-client-key"))
 			if err != nil {
-				return nil, errors.Wrapf(fmt.Errorf("%s: %w", chat.ErrInvalidConfig, err), "irc: failed to load client certificate pair: %s, %s", viper.GetString(ApiName+".tls-client-cert"), viper.GetString(ApiName+".tls-client-key"))
+				return nil, errors.Wrapf(fmt.Errorf("%s: %w", chatlib.ErrInvalidConfig, err), "irc: failed to load client certificate pair: %s, %s", viper.GetString(ApiName+".tls-client-cert"), viper.GetString(ApiName+".tls-client-key"))
 			}
 			t.Certificates = []tls.Certificate{cert}
 			log.Info().Str("api", ApiName).Msgf("tls using client certificate: %s", viper.GetString(ApiName+".tls-client-cert"))
@@ -65,7 +65,7 @@ func Init() (*chat.Option, error) {
 	case "certfp":
 		authMethod = AuthMethodCertFP
 	default:
-		return nil, errors.Wrapf(chat.ErrInvalidConfig, "irc: invalid auth method: %s", viper.GetString(ApiName+".auth-method"))
+		return nil, errors.Wrapf(chatlib.ErrInvalidConfig, "irc: invalid auth method: %s", viper.GetString(ApiName+".auth-method"))
 	}
 	log.Info().Str("api", ApiName).Msgf("auth method: %s", viper.GetString(ApiName+".auth-method"))
 
@@ -81,11 +81,11 @@ func Init() (*chat.Option, error) {
 		WithTLS(t),
 	)
 	if err != nil {
-		return nil, errors.Wrapf(fmt.Errorf("%s: %w", chat.ErrInvalidConfig, err), "irc: failed to initialize IRC")
+		return nil, errors.Wrapf(fmt.Errorf("%s: %w", chatlib.ErrInvalidConfig, err), "irc: failed to initialize IRC")
 	}
 	// Make sure a server was specified
 	if a.networkHost == "" {
-		return nil, errors.WithMessage(chat.ErrInvalidConfig, "irc: no server specified")
+		return nil, errors.WithMessage(chatlib.ErrInvalidConfig, "irc: no server specified")
 	}
 	log.Info().Str("api", ApiName).Msgf("server: %s", a.networkHost)
 	if a.networkPort == 0 {
@@ -102,12 +102,12 @@ func Init() (*chat.Option, error) {
 	log.Info().Str("api", ApiName).Msgf("nick: %s", a.nick)
 	log.Info().Str("api", ApiName).Msgf("channels: %v", a.channels)
 
-	chatOpt := chat.CombineOptions(
-		chat.WithAPI(a),
-		chat.RegisterAction("005", "", "", "", a.actionOnReady),
-		chat.RegisterAction("PRIVMSG", "!join (.*)", "!join #channel", "Join the specified channel", a.actionJoinChannel, chat.RoleAdmin),
-		chat.RegisterAction("PRIVMSG", "!(part|leave)( (.*))?", "!part #channel", "leave the specified channel", a.actionLeaveChannel, chat.RoleAdmin),
-		chat.RegisterAction("PRIVMSG", "!ping", "!ping", "ping the server and ask for a pong", a.actionPing),
+	chatOpt := chatlib.CombineOptions(
+		chatlib.WithAPI(a),
+		chatlib.RegisterAction("005", "", "", "", a.actionOnReady),
+		chatlib.RegisterAction("PRIVMSG", "!join (.*)", "!join #channel", "Join the specified channel", a.actionJoinChannel, chatlib.RoleAdmin),
+		chatlib.RegisterAction("PRIVMSG", "!(part|leave)( (.*))?", "!part #channel", "leave the specified channel", a.actionLeaveChannel, chatlib.RoleAdmin),
+		chatlib.RegisterAction("PRIVMSG", "!ping", "!ping", "ping the server and ask for a pong", a.actionPing),
 	)
 
 	return &chatOpt, nil

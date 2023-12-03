@@ -1,4 +1,4 @@
-package chat
+package chatlib
 
 type Error string
 

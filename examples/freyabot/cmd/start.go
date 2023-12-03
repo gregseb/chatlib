@@ -6,8 +6,8 @@ package cmd
 import (
 	"context"
 
-	"github.com/gregseb/freyabot/chat"
-	"github.com/gregseb/freyabot/irc"
+	"github.com/gregseb/chatlib"
+	"github.com/gregseb/chatlib/irc"
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -25,18 +25,18 @@ This application is a tool to generate the needed files
 to quickly create a Cobra application.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		c := context.Background()
-		chatOpts := make([]chat.Option, 0)
+		chatOpts := make([]chatlib.Option, 0)
 		if co, err := irc.Init(); err != nil {
 			log.Fatal().Err(err).Msg("failed to initialize IRC")
 		} else if co != nil {
 			chatOpts = append(chatOpts, *co)
 		}
-		chat, err := chat.New(chatOpts...)
+		chat, err := chatlib.New(chatOpts...)
 		if err != nil {
 			log.Fatal().Err(err).Msg("failed to initialize chat")
 		}
 
-		chat.Start(c)
+		chatlib.Start(c)
 	},
 }
 

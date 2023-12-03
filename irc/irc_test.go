@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gregseb/freyabot/chat"
-	"github.com/gregseb/freyabot/irc"
+	"github.com/gregseb/chatlib"
+	"github.com/gregseb/chatlib/irc"
 	"github.com/pkg/errors"
 	"golang.org/x/net/nettest"
 )
@@ -91,7 +91,7 @@ func TestStartTimeout(t *testing.T) {
 	}
 	if err := api.Start(c); err == nil {
 		t.Fatal("expected timeout error, got nil")
-	} else if errors.Cause(err) != chat.ErrTimeout {
+	} else if errors.Cause(err) != chatlib.ErrTimeout {
 		t.Fatalf("expected timeout error, got %+v", err)
 	}
 }
