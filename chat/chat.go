@@ -5,7 +5,6 @@ import (
 	"os"
 	"os/signal"
 	"regexp"
-	"syscall"
 
 	"github.com/rs/zerolog/log"
 )
@@ -21,6 +20,7 @@ type Message struct {
 	Command  string
 	Sender   string
 	Receiver string
+	Raw      string
 }
 
 type API interface {
@@ -64,16 +64,6 @@ func RegisterAction(command, pattern, example, help string, fn ActionFunc, roles
 	}
 }
 
-func OnClose(cb Callback) Option {
-	return func(h *Handler) error {
-		if h.closeCBs == nil {
-			h.closeCBs = make([]Callback, 0)
-		}
-		h.closeCBs = append(h.closeCBs, cb)
-		return nil
-	}
-}
-
 func CombineOptions(opts ...Option) Option {
 	return func(h *Handler) error {
 		return h.ApplyOptions(opts...)
@@ -89,13 +79,10 @@ func (h *Handler) ApplyOptions(opts ...Option) error {
 	return nil
 }
 
-type Callback func() error
-
 type Handler struct {
-	api      API
-	msg      chan *Message
-	actions  []*Action
-	closeCBs []Callback
+	api     API
+	msg     chan *Message
+	actions []*Action
 }
 
 func New(opts ...Option) (*Handler, error) {
@@ -110,18 +97,20 @@ func New(opts ...Option) (*Handler, error) {
 
 func (h *Handler) Start(ctx context.Context) error {
 	c, cancel := context.WithCancel(ctx)
+	go h.actionLoop(c)
+	go h.receiveLoop(c)
 	if err := h.api.Start(c); err != nil {
 		cancel()
 		return err
 	}
-	go h.actionLoop(c)
-	go h.receiveLoop(c)
 	// Listen for SigInt
 	sigs := make(chan os.Signal, 1)
-	signal.Notify(sigs, syscall.SIGINT)
+	signal.Notify(sigs, os.Interrupt)
 	go func() {
 		<-sigs
-		h.api.Stop(c)
+		if err := h.api.Stop(c); err != nil {
+			log.Error().Err(err).Msg("error stopping api")
+		}
 		cancel()
 	}()
 	<-c.Done()

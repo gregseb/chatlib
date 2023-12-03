@@ -4,11 +4,13 @@ import (
 	"bufio"
 	"context"
 	"crypto/tls"
+	"fmt"
 	"io"
 	"net"
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gregseb/freyabot/chat"
@@ -36,7 +38,7 @@ const (
 	AuthMethodCertFP
 )
 
-const linePattern = `^:(?P<sender>\S+) (?P<command>\S+) (?P<recipient>\S+) :(.*)\r\n$`
+const linePattern = `^:(?P<sender>\S+) (?P<command>\S+) (?P<recipient>\S+) :?(.*)\r\n$`
 const pingPattern = `^PING :(?P<arg>.*)\r\n$`
 const errPattern = `^ERROR :(?P<msg>.*)\r\n$`
 
@@ -138,6 +140,7 @@ type API struct {
 	keepAliveSeconds   float64
 
 	ready       bool
+	open        bool
 	conn        io.ReadWriteCloser
 	lnRe        *regexp.Regexp
 	pingRe      *regexp.Regexp
@@ -159,35 +162,18 @@ func (a *API) ApplyOptions(opts ...Option) error {
 	return nil
 }
 
-func New(opts ...Option) (chat.Option, error) {
+func New(opts ...Option) (*API, error) {
 	a := &API{
 		nick:               DefaultNick,
 		loginDelaySeconds:  DefaultLoginDelaySeconds,
 		dialTimeoutSeconds: DefaultDialTimeoutSeconds,
 		keepAliveSeconds:   DefaultKeepAliveSeconds,
 		msgBufSize:         DefaultMsgBufferSize,
+		open:               true,
 	}
 	if err := a.ApplyOptions(opts...); err != nil {
 		return nil, err
 	}
-	// Make sure a server was specified
-	if a.networkHost == "" {
-		return nil, errors.WithMessage(chat.ErrInvalidConfig, "irc: no server specified")
-	}
-	log.Info().Str("api", ApiName).Msgf("server: %s", a.networkHost)
-	if a.networkPort == 0 {
-		if a.tls != nil {
-			log.Info().Str("api", ApiName).Msgf("no port specified and tls is enabled, using default TLS port: %d", DefaultTlsPort)
-			a.networkPort = DefaultTlsPort
-		} else {
-			log.Info().Str("api", ApiName).Msgf("no port specified and tls is disabled, using default plain port: %d", DefaultPlainPort)
-			a.networkPort = DefaultPlainPort
-		}
-	} else {
-		log.Info().Str("api", ApiName).Msgf("port: %d", a.networkPort)
-	}
-	log.Info().Str("api", ApiName).Msgf("nick: %s", a.nick)
-	log.Info().Str("api", ApiName).Msgf("channels: %v", a.channels)
 
 	if re, err := regexp.Compile(linePattern); err != nil {
 		return nil, err
@@ -207,13 +193,7 @@ func New(opts ...Option) (chat.Option, error) {
 
 	a.rawMsgs = make(chan []byte, a.msgBufSize)
 
-	return chat.CombineOptions(
-			chat.WithAPI(a),
-			chat.RegisterAction("003", "", "", "", a.actionOnReady),
-			chat.RegisterAction("PRIVMSG", "!join (.*)", "!join #channel", "Join the specified channel", a.actionJoinChannel, chat.RoleAdmin),
-			chat.RegisterAction("PRIVMSG", "!(part|leave)( (.*))?", "!part #channel", "leave the specified channel", a.actionLeaveChannel, chat.RoleAdmin),
-		),
-		nil
+	return a, nil
 }
 
 // TODO Handle long messages
@@ -228,10 +208,10 @@ func (a *API) SendMessage(c context.Context, msg *chat.Message) error {
 	str := strings.Join(parts, " ")
 	bts := []byte(str + "\n")
 	_, err := a.conn.Write(bts)
-	log.Debug().Str("api", ApiName).Str("irc", str).Msg("sent message")
 	if err != nil {
 		return err
 	}
+	log.Debug().Str("api", ApiName).Str("irc", str).Msg("sent message")
 	return nil
 }
 
@@ -253,7 +233,9 @@ func (a *API) ReceiveMessage(c context.Context) (*chat.Message, error) {
 	bts := <-a.rawMsgs
 	line := string(bts)
 	log.Debug().Str("api", ApiName).Str("irc", line).Msg("received message")
-	msg := &chat.Message{}
+	msg := &chat.Message{
+		Raw: line,
+	}
 	if a.lnRe.MatchString(line) {
 		parts := a.lnRe.FindStringSubmatch(line)
 		msg.Sender = parts[1]
@@ -262,7 +244,9 @@ func (a *API) ReceiveMessage(c context.Context) (*chat.Message, error) {
 		msg.Text = parts[4]
 	} else if a.pingRe.MatchString(line) {
 		parts := a.pingRe.FindStringSubmatch(line)
-		return nil, a.pong(c, parts[1])
+		msg.Command = "PING"
+		msg.Text = parts[1]
+		return msg, a.pong(c, parts[1])
 	} else if a.errRe.MatchString(line) {
 		parts := a.errRe.FindStringSubmatch(line)
 		return nil, errors.Errorf("irc: error: %s", parts[1])
@@ -279,10 +263,42 @@ func (a *API) Start(c context.Context) error {
 		return err
 	}
 	go a.pollConn(c)
-	return nil
+	// Wait to start receiving messages
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	var err error
+	go func() {
+		start := time.Now()
+		for {
+			if !a.lastMsgTime.IsZero() {
+				break
+			} else if time.Since(start) > time.Duration(float64(time.Second)*a.dialTimeoutSeconds) {
+				log.Error().Str("api", ApiName).Msg("timed out waiting for message")
+				err = chat.ErrTimeout
+				wg.Done()
+				return
+			} else {
+				time.Sleep(time.Duration(float64(time.Second) * 0.1))
+			}
+		}
+		// Wait for login delay
+		time.Sleep(time.Duration(float64(time.Second) * a.loginDelaySeconds))
+		// Attempt to login
+		if e := a.login(c); err != nil {
+			// TODO If we fail to log in we should try again after a delay and fail if we can't
+			// log in after a certain number of attempts.
+			log.Error().Str("api", ApiName).Err(err).Msg("error logging in")
+			err = e
+			return
+		}
+		wg.Done()
+	}()
+	wg.Wait()
+	return err
 }
 
 func (a *API) Stop(c context.Context) error {
+	a.open = false
 	a.SendMessage(c, &chat.Message{
 		Command: "QUIT",
 		Text:    "I must go! My people need me.",
@@ -290,6 +306,16 @@ func (a *API) Stop(c context.Context) error {
 	if err := a.disconnect(); err != nil {
 		return err
 	}
+	return nil
+}
+
+func (a *API) Ping() error {
+	bts := []byte(fmt.Sprintf("PING %s\n", a.networkHost))
+	_, err := a.conn.Write(bts)
+	if err != nil {
+		return err
+	}
+	log.Debug().Str("api", ApiName).Str("irc", string(bts)).Msg("sent ping")
 	return nil
 }
 
@@ -311,29 +337,6 @@ func (a *API) connect(c context.Context) error {
 	a.conn = conn
 	a.reader = bufio.NewReader(a.conn)
 
-	// Wait to start receiving messages
-	go func() {
-		start := time.Now()
-		for {
-			if !a.lastMsgTime.IsZero() {
-				break
-			} else if time.Since(start) > time.Duration(float64(time.Second)*a.dialTimeoutSeconds) {
-				log.Error().Str("api", ApiName).Msg("timed out waiting for message")
-				return
-			} else {
-				time.Sleep(time.Duration(float64(time.Second) * 0.1))
-			}
-		}
-		// Wait for login delay
-		time.Sleep(time.Duration(float64(time.Second) * a.loginDelaySeconds))
-		// Attempt to login
-		if err := a.login(c); err != nil {
-			// TODO If we fail to log in we should try again after a delay and fail if we can't
-			// log in after a certain number of attempts.
-			log.Error().Str("api", ApiName).Err(err).Msg("error logging in")
-			return
-		}
-	}()
 	return nil
 }
 
@@ -343,7 +346,7 @@ func (a *API) connect(c context.Context) error {
 // TODO It shouldn't be possible to miss messages, but it's happening with motd after registering.
 // And before implementing a queue, it was happening with most of the messages after registering.
 func (a *API) pollConn(c context.Context) {
-	for {
+	for a.open {
 		err := a.readMessage(c)
 		if err != nil {
 			log.Error().Str("api", ApiName).Err(err).Msg("error reading message")
@@ -438,6 +441,11 @@ func (a *API) actionLeaveChannel(c context.Context, re *regexp.Regexp, msg *chat
 		return err
 	}
 	return nil
+}
+
+func (a *API) actionPing(c context.Context, re *regexp.Regexp, msg *chat.Message) error {
+	err := a.Ping()
+	return err
 }
 
 func (a *API) getDialer() (*net.Dialer, error) {

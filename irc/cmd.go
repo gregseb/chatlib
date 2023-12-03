@@ -69,7 +69,7 @@ func Init() (*chat.Option, error) {
 	}
 	log.Info().Str("api", ApiName).Msgf("auth method: %s", viper.GetString(ApiName+".auth-method"))
 
-	chatOpt, err := New(
+	a, err := New(
 		WithNetwork(viper.GetString(ApiName+".server"), viper.GetInt(ApiName+".port")),
 		WithNick(viper.GetString(ApiName+".nick")),
 		WithAuthMethod(authMethod),
@@ -80,7 +80,37 @@ func Init() (*chat.Option, error) {
 		WithMessageBufferSize(viper.GetInt(ApiName+".msg-buffer-size")),
 		WithTLS(t),
 	)
-	return &chatOpt, err
+	if err != nil {
+		return nil, errors.Wrapf(fmt.Errorf("%s: %w", chat.ErrInvalidConfig, err), "irc: failed to initialize IRC")
+	}
+	// Make sure a server was specified
+	if a.networkHost == "" {
+		return nil, errors.WithMessage(chat.ErrInvalidConfig, "irc: no server specified")
+	}
+	log.Info().Str("api", ApiName).Msgf("server: %s", a.networkHost)
+	if a.networkPort == 0 {
+		if a.tls != nil {
+			log.Info().Str("api", ApiName).Msgf("no port specified and tls is enabled, using default TLS port: %d", DefaultTlsPort)
+			a.networkPort = DefaultTlsPort
+		} else {
+			log.Info().Str("api", ApiName).Msgf("no port specified and tls is disabled, using default plain port: %d", DefaultPlainPort)
+			a.networkPort = DefaultPlainPort
+		}
+	} else {
+		log.Info().Str("api", ApiName).Msgf("port: %d", a.networkPort)
+	}
+	log.Info().Str("api", ApiName).Msgf("nick: %s", a.nick)
+	log.Info().Str("api", ApiName).Msgf("channels: %v", a.channels)
+
+	chatOpt := chat.CombineOptions(
+		chat.WithAPI(a),
+		chat.RegisterAction("005", "", "", "", a.actionOnReady),
+		chat.RegisterAction("PRIVMSG", "!join (.*)", "!join #channel", "Join the specified channel", a.actionJoinChannel, chat.RoleAdmin),
+		chat.RegisterAction("PRIVMSG", "!(part|leave)( (.*))?", "!part #channel", "leave the specified channel", a.actionLeaveChannel, chat.RoleAdmin),
+		chat.RegisterAction("PRIVMSG", "!ping", "!ping", "ping the server and ask for a pong", a.actionPing),
+	)
+
+	return &chatOpt, nil
 }
 
 func Flags(cmd *cobra.Command) {

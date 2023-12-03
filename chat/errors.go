@@ -8,4 +8,5 @@ func (e Error) Error() string {
 
 const (
 	ErrInvalidConfig Error = "invalidConfig"
+	ErrTimeout       Error = "timeout"
 )
