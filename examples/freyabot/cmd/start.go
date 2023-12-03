@@ -36,7 +36,7 @@ to quickly create a Cobra application.`,
 			log.Fatal().Err(err).Msg("failed to initialize chat")
 		}
 
-		chatlib.Start(c)
+		chat.Start(c)
 	},
 }
 
